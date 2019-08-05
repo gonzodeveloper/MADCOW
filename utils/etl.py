@@ -9,6 +9,8 @@ import os
 import glob
 import json
 import sys
+import subprocess
+import io
 
 
 def get_output_files(data_dir):
@@ -150,69 +152,75 @@ def load_cache(data_dir):
     return fp
 
 
-def generate_turbsim_input(destination, turbsim_template, inflow_baseline, openfast_fst,
-                           config, farm_json=None, wind_direction=None):
+def run_openfast_sim(simulation_dir, windspeed, turbulence_class, turbsim_template, inflow_baseline, openfast_fst):
     """
-    Generate turbsim inputs for a simulation.
-    Randomizes wind speed, and turbulence intensity
-    Simulation can be for a single turbine or entire farm.
-    Single turbine simulation will generate single ".inp" in destination directory.
-    Farm simulation will create a sub directory containing the ".inp" for each turbine in the farm.
-
-    Every turbine directory will also be populated with the given inflow baseline and openfast .fst files
-    for future OpenFAST run.
-
-
-    :param destination: destination directory
+    Run a full OpenFAST simulation, using the given template files
+    :param simulation_dir: directory to put run output
+    :param windspeed: windspeed (m/s) for simulation
+    :param turbulence_class: IEC turbulence class (A, B, or C)
     :param turbsim_template: template ".inp" file for Turbsim
     :param inflow_baseline: InflowWind v3.01.* INPUT FILE (".dat"); required for OpenFAST
     :param openfast_fst: OpenFAST example INPUT FILE (".fst"); required for OpenFAST
-    :param config: 'single' or 'farm' simulation type
-    :param farm_json: FLORIS input template with farm layout, turbine, and wake info
-    :param wind_direction: if running farm simulation user must give a incoming wind direction in degrees
-    :return: None
+
+    :return: Success of simulatiion
     """
-
-    print("Generating turbsim inputs in %s" % destination)
-
-    # Generate random values wind speed and turbulence intensity
+    # Random seed for turbulence
     seed = np.random.randint(-2147483648, 2147483648)
-    wind_speed = np.random.uniform(4, 25)
-    turb_intensity = np.random.uniform(0, 1)
 
-    if config == 'single':
-        # Write Turbsim .inp to destination
-        tbine_dir = destination
-        shutil.copy(inflow_baseline, tbine_dir)
-        shutil.copy(openfast_fst, tbine_dir)
-        _write_turbsim_imp(tbine_dir, turbsim_template, seed, wind_speed, turb_intensity)
+    # Copy in input files
+    shutil.copy(inflow_baseline, simulation_dir)
+    shutil.copy(openfast_fst, simulation_dir)
+    _write_turbsim_imp(simulation_dir, turbsim_template, seed, windspeed, turbulence_class)
 
-    elif config == 'farm':
-        # Read FLORIS json template and assign new values
-        with open(farm_json) as f:
-            floris_temp = json.load(f)
-            floris_temp['farm']['properties']['wind_speed'] = wind_speed
-            floris_temp['farm']['properties']['wind_direction'] = wind_direction
-            floris_temp['farm']['properties']['turbulence_intensity'] = turb_intensity
-        # Write to run dir
-        with open(destination + "floris_input.json", 'w', encoding='utf-8') as f:
-            json.dump(floris_temp, f, indent=4, ensure_ascii=False)
+    subprocess.run(["turbsim", simulation_dir + turbsim_template])
+    status = subprocess.run(["openfast", simulation_dir, openfast_fst])
+    return status.returncode
 
-        # Create FLORIS model
-        floris_model = floris.Floris(destination + "floris_input.json")
-        # Calculate wake BEFORE getting turbine velocities
-        floris_model.farm.flow_field.calculate_wake()
-        turbines = floris_model.farm.turbines
 
-        # For each turbine create a sub directory and populate it
-        for idx, tbine in enumerate(turbines):
-            tbine_dir = destination + "turbine_{0:03d}".format(idx)
-            os.mkdir(tbine_dir)
-            shutil.copy(inflow_baseline, tbine_dir)
-            shutil.copy(openfast_fst, tbine_dir)
-            _write_turbsim_imp(tbine_dir, turbsim_template, seed,
-                               wind_speed=tbine.average_velocity,
-                               turb_intensity=tbine.turbulence_intensity)
+def iec_class_to_float(iec_class):
+    """
+    Converts IEC turbulence characteristic (A B or C) to expected hub-height turbulence intensity (float value)
+    :param iec_class: IEC turbulence characteristic
+    :return: hub-height turbulence intensity; float
+    """
+    if iec_class == 'A':
+        return 0.16
+    elif iec_class == 'B':
+        return 0.14
+    elif iec_class == 'C':
+        return 0.12
+    else:
+        raise ValueError('Valid iec_class not in ["A", "B" or "C"]')
+
+
+def run_floris_sim(farm_json, wind_direction, wind_speed, turbulence_class):
+    """
+    Runs a FLORIS simulation on a provided layout with a given wind direction, speed, and turbulence class.
+    :param farm_json: Location of floris .json file with the farm layout and turbine spec
+    :param wind_direction: direction of incoming wind
+    :param wind_speed: global speed of incoming wind
+    :param turbulence_class: IEC turbulence class
+    :return: dictionary containing lists of windspeeds and turbulence intensities for all turbines in farm after
+            wake is calculated
+
+    """
+    # Read FLORIS json template and assign new values
+    with open(farm_json) as f:
+        floris_config = json.load(f)
+        floris_config['farm']['properties']['wind_speed'] = wind_speed
+        floris_config['farm']['properties']['wind_direction'] = wind_direction
+        floris_config['farm']['properties']['turbulence_intensity'] = iec_class_to_float(turbulence_class)
+
+    # Create FLORIS model
+    floris_model = floris.Floris(io.BytesIO(floris_config))
+
+    # Calculate wake BEFORE getting turbine velocities
+    floris_model.farm.flow_field.calculate_wake()
+
+    turbine_speeds = [turb.average_velocity for turb in floris_model.farm.turbines]
+    turbine_intensities = [turb.turbulence_intensity for turb in floris_model.farm.turbines]
+
+    return {'turbine_speeds': turbine_speeds, 'turbine_intensities': turbine_intensities}
 
 
 def _write_turbsim_imp(turbine_dir, turbsim_template, seed, wind_speed, turb_intensity):
@@ -229,11 +237,11 @@ def _write_turbsim_imp(turbine_dir, turbsim_template, seed, wind_speed, turb_int
     """
     with open(turbsim_template, "r") as turbsim_input:
         # Set the random seed
-        new_text = re.sub('(SEED_01)', str(seed), turbsim_input.read())
+        new_text = re.sub('(TURBULENCE_SEED)', str(seed), turbsim_input.read())
         # Set the wind speed
-        new_text = re.sub('WSPEED', '%.3f' % wind_speed, new_text)
+        new_text = re.sub('WIND_SPEED', '%.3f' % wind_speed, new_text)
         # Set turb intensity
-        new_text = re.sub('TURB-INTENSITY', '%.3f' % turb_intensity, new_text)
+        new_text = re.sub('TURBULENCE_CLASS', turb_intensity, new_text)
 
     # Write to output
     output_file = turbine_dir + "/90m_12mps_twr.inp"
@@ -374,3 +382,5 @@ def print_progress_bar(idx, total):
           % (bar, idx, total), end='\r')
     if idx == total:
         print()
+
+

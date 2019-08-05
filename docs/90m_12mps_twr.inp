@@ -2,7 +2,7 @@ TurbSim Input File. Valid for TurbSim v1.50; 17-May-2010; Example file that can 
 
 ---------Runtime Options-----------------------------------
 False          Echo
-SEED_01        RandSeed1       - First random seed  (-2147483648 to 2147483647)
+TURBULENCE_SEED        RandSeed1       - First random seed  (-2147483648 to 2147483647)
 RanLux         RandSeed2       - Second random seed (-2147483648 to 2147483647) for intrinsic pRNG, or an alternative pRNG: "RanLux" or "RNSNLW"
 False          WrBHHTP         - Output hub-height turbulence parameters in binary form?  (Generates RootName.bin)
 False          WrFHHTP         - Output hub-height turbulence parameters in formatted form?  (Generates RootName.dat)
@@ -31,13 +31,13 @@ True           Clockwise       - Clockwise rotation looking downwind? (used only
 IECKAI         TurbModel       - Turbulence model ("IECKAI"=Kaimal, "IECVKM"=von Karman, "GP_LLJ", "NWTCUP", "SMOOTH", "WF_UPW", "WF_07D", "WF_14D", or "NONE")
 "unused"  UserFile        - Name of the file that contains inputs for user-defined spectra or time series inputs (used only for "USRINP" and "TIMESR" models)
 "1-Ed3"   IECstandard     - Number of IEC 61400-x standard (x=1,2, or 3 with optional 61400-1 edition number (i.e. "1-Ed2") )
-"TURB-INTENSITY"            IECturbc        - IEC turbulence characteristic ("A", "B", "C" or the turbulence intensity in percent) ("KHTEST" option with NWTCUP, not used for other models)
+"TURBULENCE_CLASS"            IECturbc        - IEC turbulence characteristic ("A", "B", "C" or the turbulence intensity in percent) ("KHTEST" option with NWTCUP, not used for other models)
 NTM            IEC_WindType    - IEC turbulence type ("NTM"=normal, "xETM"=extreme turbulence, "xEWM1"=extreme 1-year wind, "xEWM50"=extreme 50-year wind, where x=wind turbine class 1, 2, or 3)
 default        ETMc            - IEC Extreme turbulence model "c" parameter [m/s]
 PL             WindProfileType - Wind profile type ("JET"=Low-level jet,"LOG"=Logarithmic,"PL"=Power law, or "default", or "USR"=User-defined)
 "unused"  ProfileFile     - Name of the file that contains input profiles for WindProfileType="USR" and/or TurbModel="USRVKM" [-]
  90.           RefHt           - Height of the reference wind speed [m]
- WSPEED        URef            - Mean (total) wind speed at the reference height [m/s]
+ WIND_SPEED        URef            - Mean (total) wind speed at the reference height [m/s]
 default        ZJetMax         - Jet height [m] (used only for JET wind profile, valid 70-490 m)
 default        PLExp           - Power law exponent [-] (or "default")
 default        Z0              - Surface roughness length [m] (or "default")
